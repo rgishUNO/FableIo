@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard1.6</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\paket-files\fable-compiler\fable-graphics\bindings\fable-import-d3\Fable.Import.D3.fs">
+      <Paket>True</Paket>
+      <Link>paket-files/Fable.Import.D3.fs</Link>
+    </Compile>
+    <Compile Include="App.fs" />
+  </ItemGroup>
+  <Import Project="..\..\.paket\Paket.Restore.targets" />
+</Project>

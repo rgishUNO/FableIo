@@ -1,0 +1,46 @@
+﻿<!DOCTYPE HTML>
+<html lang="en">
+<head>
+  <meta http-equiv='Content-Type' content='text/html; charset=utf-8'>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Fable • WebGL Terrain with three.js</title>
+	  <style>
+	         body {
+	            color: #61443e;
+	            font-family:Monospace;
+	            font-size:13px;
+	            text-align:center;
+	            background-color: #bfd1e5;
+	            margin: 0px;
+	            overflow: hidden;
+	         }
+	         #info {
+	            position: absolute;
+	            top: 0px; width: 100%;
+	            padding: 5px;
+	         }
+	         a {
+	            color: #a06851;
+	         }
+	  </style>
+</head>
+<body>
+  <!-- [head] -->
+  <script src="//cdnjs.cloudflare.com/ajax/libs/three.js/r83/three.js"></script>
+  <script src="http://threejs.org/examples/js/loaders/LoaderSupport.js"></script>
+  <script src="http://threejs.org/examples/js/loaders/OBJLoader2.js"></script>
+  <script src="http://threejs.org/examples/js/loaders/OBJLoader.js"></script>
+  <!-- [/head] -->
+  <!-- [body] -->
+  <div id="container"><br /><br /><br /><br /><br />Generating world...
+  <br>
+  If this message doesn't disappear after a few seconds, you may want to verify that WebGL
+  <a href="http://get.webgl.org">is enabled in your web browser</a>
+  </div>
+  <div id="info">
+  <a href="http://threejs.org" target="_blank">three.js</a> - webgl box demo<br />(XXXXXXX)
+  </div>
+  <!-- [/body] -->
+  <script src="bundle.js"></script>
+</body>
+</html>
