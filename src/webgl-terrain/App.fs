@@ -1,6 +1,6 @@
 (**
- - title: WebGL Geometry Terrain
- - tagline: A 3D world right in the browser
+ - title: WebGL Bin Packing
+ - tagline: A 3D algorithm right in the browser
  - app-style: height:450px; width:800px; margin:20px auto 50px auto;
  - intro: This demo is a Fable port of the [WebGL Geometry Terrain](http://threejs.org/examples/#webgl_geometry_terrain)
    three.js demo. It uses the three.js library to randomly generate a 3D terrain which can be navigated in a first-person view.
@@ -20,8 +20,8 @@ JavaScript helpers and imports
 
 Fable comes with [an F# mapping for three.js](https://github.com/fable-compiler/Fable/tree/master/import/three),
 which defines all the types and functions for three.js that we'll need in this example.
-In addition this demo uses custom scripts for ImprovedNoise and FirstPersonControls.
-We'll write the mappings for those two inline.
+In addition this demo uses custom scripts for ImprovedNoise, FirstPersonControls, and OrbitControls.
+We'll write the mappings for those three inline.
 *)
 
 module WebGL.Terrain
@@ -36,24 +36,9 @@ open Fable.Import
 [<Measure>] type kilograms
 [<Measure>] type degrees
 
-/// Represents the API exposed by ImprovedNoise script
-type IPerlin =
-    abstract noise: x:float * y:float * z:float -> float
-
-/// Represents the API exposed by FirstPersonControls script
-type IFirstPersonControls =
-    abstract movementSpeed: float with get, set
-    abstract lookSpeed: float with get, set
-    abstract handleResize: unit -> unit
-    abstract update: float -> unit
-
 type IOrbitControls =
     abstract handleResize: unit -> unit
     abstract update: unit -> unit
-
-let ImprovedNoise: unit->IPerlin = importDefault "./lib/ImprovedNoise.js"
-let FirstPersonControls: JsConstructor<Three.Camera, Browser.HTMLElement, IFirstPersonControls> =
-    importDefault "./lib/FirstPersonControls.js"
 
 let OrbitControls: JsConstructor<Three.Camera, Browser.HTMLElement, IOrbitControls> =
     importDefault "./lib/OrbitControls.js"    
@@ -375,8 +360,8 @@ let switch processFunction input =
 
 let displayResult result =
   match result with
-  | Success s -> printfn "%s" s
-  | Failure f -> printfn "%s" f
+  | Success s -> printf "%s" s
+  | Failure f -> printf "%s" f
 
 let getResult result =
   match result with
@@ -486,12 +471,74 @@ let convexHullHeight(extremePoint:Point, toy:Toy, currentConvexHullHeightMax) =
 
 let tolerance = 0.001M<centimeters>
 
-let roomInBoxForNewToy (dimensions:Dimensions, toy:Toy) =
+let roomInBoxForNewToyVersusBox (dimensions:Dimensions, toy:Toy) =
   let lengthAvailability = dimensions.Length - (toy.Origin.X + toy.Dimensions.Length) >= tolerance
-  let widthAvailability = dimensions.Width - (toy.Origin.Y + toy.Dimensions.Width) >= tolerance
+  let widthAvailability = dimensions.Width - (toy.Origin.Y + toy.Dimensions.Width)  >= tolerance
   let heightAvailability = dimensions.Height - (toy.Origin.Z + toy.Dimensions.Height) >= tolerance
   let temp = heightAvailability
   lengthAvailability && widthAvailability && heightAvailability
+
+let packedToyRightGreaterThanNewToyLeft (packedToyOrigin:decimal<centimeters>, packedToyDimension:decimal<centimeters>, toyOrigin:decimal<centimeters>) =
+  let greater = toyOrigin < packedToyOrigin + packedToyDimension
+  greater
+
+let packedToyLeftLessThanNewToyRight (packedToyOrigin:decimal<centimeters>, toyOrigin:decimal<centimeters>, toyDimension:decimal<centimeters>) =
+  let less = packedToyOrigin < toyOrigin + toyDimension
+  less
+
+let crossOnTheXPlane (packedToy:Toy, toy:Toy) =
+  let cross =
+    packedToyRightGreaterThanNewToyLeft(packedToy.Origin.X, packedToy.Dimensions.Length, toy.Origin.X)
+    && packedToyLeftLessThanNewToyRight(packedToy.Origin.X, toy.Origin.X, toy.Dimensions.Length)
+  cross
+
+let crossOnTheYPlane (packedToy:Toy, toy:Toy) =
+  let cross =
+    packedToyRightGreaterThanNewToyLeft(packedToy.Origin.Y, packedToy.Dimensions.Width, toy.Origin.Y)
+    && packedToyLeftLessThanNewToyRight(packedToy.Origin.Y, toy.Origin.Y, toy.Dimensions.Width)
+  cross
+
+let crossOnTheZPlane (packedToy:Toy, toy:Toy) =
+  let cross =
+    packedToyRightGreaterThanNewToyLeft(packedToy.Origin.Z, packedToy.Dimensions.Height, toy.Origin.Z)
+    && packedToyLeftLessThanNewToyRight(packedToy.Origin.Z, toy.Origin.Z, toy.Dimensions.Height)
+  cross
+
+let calculateAvailability (packedToy:Toy, toy:Toy) =
+  let availability = not (crossOnTheXPlane(packedToy, toy)
+                          && crossOnTheYPlane(packedToy, toy)
+                          && crossOnTheZPlane(packedToy, toy))
+  availability
+
+let rec roomInBoxForNewToyVersusAlreadyPackedToysRecursive (dimensions:Dimensions, toy:Toy, packedToys:Toy list, accumulator:bool list) =
+  match packedToys with
+  | head :: tail ->
+      let availability = calculateAvailability(head, toy)
+      roomInBoxForNewToyVersusAlreadyPackedToysRecursive(dimensions, toy, tail, availability::accumulator)
+  | [] -> accumulator
+                                    
+let roomInBoxForNewToyVersusAlreadyPackedToys (dimensions:Dimensions, toy:Toy, packing:Packing) =
+  let accumulator = []
+  match packing.Order.Toys with
+  | head :: tail ->
+      let availability = calculateAvailability(head, toy)
+      let temp = availability
+      roomInBoxForNewToyVersusAlreadyPackedToysRecursive(dimensions, toy, tail, availability::accumulator)
+  | [] -> accumulator
+
+let roomInBoxForNewToy (dimensions:Dimensions, toy:Toy, packing:Packing) =
+  let versusBox = roomInBoxForNewToyVersusBox(dimensions, toy)
+
+  // If we fail already fitting in the box, don't worry about sifting through packed toys, just default to a false array
+  let versusAlreadyPackedToys = if not versusBox then
+                                  false::[]
+                                else
+                                  roomInBoxForNewToyVersusAlreadyPackedToys(dimensions, toy, packing)
+
+  let versusPacking = versusAlreadyPackedToys 
+                      |> List.where(fun x -> x = false) 
+                      |> List.isEmpty
+  (versusBox && versusPacking)
 
 let attemptingToDivideByZero volumeOfToysPackedSoFarIncludingCurrentToy =
   volumeOfToysPackedSoFarIncludingCurrentToy = 0M<centimeters^3>
@@ -507,7 +554,7 @@ let packingIndex(length:decimal<centimeters>, width:decimal<centimeters>, height
       (numerator/volumeOfToysPackedSoFarIncludingCurrentToy)
   index
 
-let packingIndexZ(length:decimal<centimeters>, width:decimal<centimeters>, height:decimal<centimeters>, volumeOfToysPackedSoFarIncludingCurrentToy:decimal<centimeters^3>, lowestZRatio:decimal<centimeters>, roomRatio:decimal<centimeters>) =
+let packingIndexZ(length:decimal<centimeters>, width:decimal<centimeters>, height:decimal<centimeters>, volumeOfToysPackedSoFarIncludingCurrentToy:decimal<centimeters^3>, lowestZRatio:decimal<centimeters>, roomRatio:decimal<centimeters>, maxSoFar) =
   let heightDifferential = height * lowestZRatio
   let numerator = length * width * heightDifferential * roomRatio
 
@@ -516,7 +563,13 @@ let packingIndexZ(length:decimal<centimeters>, width:decimal<centimeters>, heigh
       numerator/(1M * 1M<centimeters^3>)
     else
       (numerator/volumeOfToysPackedSoFarIncludingCurrentToy)
-  index
+
+  let (indexMax, _, _) = maxSoFar
+  let roomRatioBasedIndex = if roomRatio = 0M<centimeters> then
+                              indexMax - 1000M<centimeters^2>
+                            else
+                              index
+  roomRatioBasedIndex
 
 let maxPackingIndex x y = 
   let (a, b, c) = x
@@ -534,7 +587,7 @@ let rec calculateIndex (currentToy:Toy, extremePoint:Point, volume:decimal<centi
   let max = maxPackingIndex index maxSoFar
   max
 
-let rec calculateIndexZValue (currentToy:Toy, box:Box, extremePoint:Point, volume:decimal<centimeters^3>, convexHull:ConvexHull, maxSoFar, lowestZRatio) =
+let rec calculateIndexZValue (currentToy:Toy, box:Box, extremePoint:Point, volume:decimal<centimeters^3>, convexHull:ConvexHull, maxSoFar, lowestZRatio, packing:Packing) =
   let convexHullPoint = 
     calculateConvexHullWithCurrentToy(extremePoint, currentToy, convexHull)
   let lpj = convexHullPoint.Dimensions.Length
@@ -554,13 +607,13 @@ let rec calculateIndexZValue (currentToy:Toy, box:Box, extremePoint:Point, volum
             }
         }
   
-  let roomAvailable =  roomInBoxForNewToy (box.Dimensions, currentToyAtExtremePoint)
+  let roomAvailable =  roomInBoxForNewToy (box.Dimensions, currentToyAtExtremePoint, packing)
   let roomRatio =
     if roomAvailable then
       1M<centimeters>
     else
       0M<centimeters>    
-  let index = (packingIndexZ(lpj, wpj, hpj, volume, newLowestZDifferential, roomRatio), extremePoint, convexHullPoint)
+  let index = (packingIndexZ(lpj, wpj, hpj, volume, newLowestZDifferential, roomRatio, maxSoFar), extremePoint, convexHullPoint)
 
   let max = maxPackingIndex index maxSoFar
   max
@@ -572,11 +625,11 @@ let rec calculateIndexViaListOfExtremePointsRecursive (currentToy:Toy, extremePo
       calculateIndexViaListOfExtremePointsRecursive(currentToy, tail, volume, extremePointsIndex, convexHull)
   | [] -> maxIndexSoFar
 
-let rec calculateIndexViaListOfExtremePointsZValuesRecursive (box:Box, currentToy:Toy, extremePoints:Point list, volume:decimal<centimeters^3>, maxIndexSoFar, convexHull:ConvexHull, lowestZValue:decimal<centimeters>) =
+let rec calculateIndexViaListOfExtremePointsZValuesRecursive (box:Box, currentToy:Toy, extremePoints:Point list, volume:decimal<centimeters^3>, maxIndexSoFar, convexHull:ConvexHull, lowestZValue:decimal<centimeters>, packing:Packing) =
   match extremePoints with
   | head :: tail ->
-      let extremePointsIndex = calculateIndexZValue(currentToy, box, head, volume, convexHull, maxIndexSoFar, lowestZValue) 
-      calculateIndexViaListOfExtremePointsZValuesRecursive(box, currentToy, tail, volume, extremePointsIndex, convexHull, lowestZValue)
+      let extremePointsIndex = calculateIndexZValue(currentToy, box, head, volume, convexHull, maxIndexSoFar, lowestZValue, packing) 
+      calculateIndexViaListOfExtremePointsZValuesRecursive(box, currentToy, tail, volume, extremePointsIndex, convexHull, lowestZValue, packing)
   | [] -> maxIndexSoFar
 
 let sortMethodForExtremePointZValues (point1:Point) (point2:Point)=
@@ -590,13 +643,13 @@ let sortMethodForExtremePointZValues (point1:Point) (point2:Point)=
     else
       -1
 
-let  calculateIndexViaListOfExtremePointsZValues (currentToy:Toy, box:Box, setOfExtremePoints:Point list, volume:decimal<centimeters^3>, maxIndexSoFar, convexHull:ConvexHull) =
+let  calculateIndexViaListOfExtremePointsZValues (currentToy:Toy, box:Box, setOfExtremePoints:Point list, volume:decimal<centimeters^3>, maxIndexSoFar, convexHull:ConvexHull, packing:Packing) =
   let sortedSetOfExtremePoints = (setOfExtremePoints |> List.sortWith(sortMethodForExtremePointZValues))
   let lowestZValue = sortedSetOfExtremePoints.[0].Z
   match sortedSetOfExtremePoints with
   | head :: tail ->
-      let extremePointsIndex = calculateIndexZValue(currentToy, box, head, volume, convexHull, maxIndexSoFar, lowestZValue)
-      calculateIndexViaListOfExtremePointsZValuesRecursive(box, currentToy, tail, volume, extremePointsIndex, convexHull, lowestZValue)
+      let extremePointsIndex = calculateIndexZValue(currentToy, box, head, volume, convexHull, maxIndexSoFar, lowestZValue, packing)
+      calculateIndexViaListOfExtremePointsZValuesRecursive(box, currentToy, tail, volume, extremePointsIndex, convexHull, lowestZValue, packing)
   | [] -> maxIndexSoFar
 
 let  calculateIndexViaListOfExtremePoints (currentToy:Toy, setOfExtremePoints:Point list, volume:decimal<centimeters^3>, maxIndexSoFar, convexHull:ConvexHull) =
@@ -679,7 +732,7 @@ let rec fitnessEvaluation (toys:Toy list, box:Box, packing:Packing, convexHull:C
           Weight = head.Weight
           Origin = indexPoint
         }
-      let availability = roomInBoxForNewToy(box.Dimensions, newPackedToy)
+      let availability = roomInBoxForNewToy(box.Dimensions, newPackedToy, packing)
       let newExtremePointsFromNewlyPackedToy = calculateToyExtremePoints(newPackedToy)
       let newExtremePoints = (Set filteredExtremePoints) + (Set newExtremePointsFromNewlyPackedToy) |> Set.toList
       let newOrder =
@@ -696,14 +749,14 @@ let rec fitnessEvaluation (toys:Toy list, box:Box, packing:Packing, convexHull:C
       fitnessEvaluation(tail, box, newPacking, newConvexHull, index)
   | [] -> packing
 
-let rec packOrderInBoxRecursive (box:Box, toys:Toy list, packing:Packing, convexHull:ConvexHull, maxIndexSoFar) =
+let rec packOrderInBoxWuMutedRecursive (box:Box, toys:Toy list, packing:Packing, convexHull:ConvexHull, maxIndexSoFar, discardZ) =
   let accumulator = 0M<centimeters^3>
   match toys with
   | head :: tail ->
     let currentToyVolume = volume head.Dimensions.Length head.Dimensions.Width head.Dimensions.Height
     let packedToyVolume = getToysVolume(packing.Order.Toys, accumulator)
     let inclusiveToyVolume = packedToyVolume + currentToyVolume
-    let index = calculateIndexViaListOfExtremePointsZValues(head, box, packing.SetOfExtremePoints, inclusiveToyVolume, maxIndexSoFar, convexHull)
+    let index = calculateIndexViaListOfExtremePoints(head, packing.SetOfExtremePoints, inclusiveToyVolume, maxIndexSoFar, convexHull)
     let fitVolumePacking = doesBoxHaveEnoughFreeVolumeForToy(box.Dimensions, head, packing)
     let (_, indexPoint, _) = index
     let newConvexHull = calculateConvexHullWithCurrentToy(indexPoint, head, convexHull)
@@ -723,25 +776,128 @@ let rec packOrderInBoxRecursive (box:Box, toys:Toy list, packing:Packing, convex
         Weight = head.Weight
         Origin = indexPoint
       }
-    let availability = roomInBoxForNewToy(box.Dimensions, newPackedToy)
-    let newExtremePointsFromNewlyPackedToy = calculateToyExtremePoints(newPackedToy)
-    let newExtremePoints = (Set filteredExtremePoints) + (Set newExtremePointsFromNewlyPackedToy) |> Set.toList
-    let newOrder =
-      {
-        Details = fitVolumePacking.Order.Details
-        OrderId = fitVolumePacking.Order.OrderId
-        Toys = newPackedToy::fitVolumePacking.Order.Toys      
-      }
-    let newPacking =
-      {       
-        SetOfExtremePoints = newExtremePoints
-        Order = newOrder
-      }
-    packOrderInBoxRecursive (box, tail, newPacking, convexHull, maxIndexSoFar)
+    let availability = roomInBoxForNewToy(box.Dimensions, newPackedToy, packing)
+    if availability then
+        let newExtremePointsFromNewlyPackedToy = calculateToyExtremePoints(newPackedToy)
+        let newExtremePoints = (Set filteredExtremePoints) + (Set newExtremePointsFromNewlyPackedToy) |> Set.toList
+        let newOrder =
+          {
+            Details = fitVolumePacking.Order.Details
+            OrderId = fitVolumePacking.Order.OrderId
+            Toys = newPackedToy::fitVolumePacking.Order.Toys      
+          }
+        let newPacking =
+          {       
+            SetOfExtremePoints = newExtremePoints
+            Order = newOrder
+          }
+        let (indexValue, _, _) = index
+        let newMaxIndexSoFar = (indexValue, newExtremePoints.[0], newConvexHull)
+        packOrderInBoxWuMutedRecursive (box, tail, newPacking, convexHull, newMaxIndexSoFar, discardZ)
+    else
+        let newExtremePoints = (Set filteredExtremePoints) |> Set.toList
+        let setNewPackedToyOutsideOfBox = 
+          {
+              Details = newPackedToy.Details                
+              Dimensions = newPackedToy.Dimensions
+              Weight = newPackedToy.Weight
+              Origin =             
+              { 
+                  X = 0M<centimeters> - box.Dimensions.Length - 2M<centimeters>
+                  Y = box.Dimensions.Width + 1M<centimeters>
+                  Z = discardZ
+              }
+          } 
+        let newOrder =
+          {
+            Details = fitVolumePacking.Order.Details
+            OrderId = fitVolumePacking.Order.OrderId
+            Toys = setNewPackedToyOutsideOfBox::fitVolumePacking.Order.Toys      
+          }
+        let newPacking =
+          {       
+            SetOfExtremePoints = newExtremePoints
+            Order = newOrder
+          }
+        let newDiscardZ = discardZ + newPackedToy.Dimensions.Height
+        packOrderInBoxWuMutedRecursive (box, tail, newPacking, convexHull, maxIndexSoFar, newDiscardZ)
     | [] -> packing
 
-let packOrderInBox (box:Box, toys:Toy list, packing:Packing) =
+let rec packOrderInBoxWuDerivedRecursive (box:Box, toys:Toy list, packing:Packing, convexHull:ConvexHull, maxIndexSoFar, discardZ) =
   let accumulator = 0M<centimeters^3>
+  match toys with
+  | head :: tail ->
+    let currentToyVolume = volume head.Dimensions.Length head.Dimensions.Width head.Dimensions.Height
+    let packedToyVolume = getToysVolume(packing.Order.Toys, accumulator)
+    let inclusiveToyVolume = packedToyVolume + currentToyVolume
+    let index = calculateIndexViaListOfExtremePointsZValues(head, box, packing.SetOfExtremePoints, inclusiveToyVolume, maxIndexSoFar, convexHull, packing)
+    let fitVolumePacking = doesBoxHaveEnoughFreeVolumeForToy(box.Dimensions, head, packing)
+    let (_, indexPoint, _) = index
+    let newConvexHull = calculateConvexHullWithCurrentToy(indexPoint, head, convexHull)
+    let setOfExtremePointsFound = 
+      [
+        {
+          X = indexPoint.X
+          Y = indexPoint.Y
+          Z = indexPoint.Z
+        }
+      ]
+    let filteredExtremePoints = (Set fitVolumePacking.SetOfExtremePoints) - (Set setOfExtremePointsFound) |> Set.toList
+    let newPackedToy =
+      {
+        Details = head.Details
+        Dimensions = head.Dimensions
+        Weight = head.Weight
+        Origin = indexPoint
+      }
+    let availability = roomInBoxForNewToy(box.Dimensions, newPackedToy, packing)
+    if availability then
+        let newExtremePointsFromNewlyPackedToy = calculateToyExtremePoints(newPackedToy)
+        let newExtremePoints = (Set filteredExtremePoints) + (Set newExtremePointsFromNewlyPackedToy) |> Set.toList
+        let newOrder =
+          {
+            Details = fitVolumePacking.Order.Details
+            OrderId = fitVolumePacking.Order.OrderId
+            Toys = newPackedToy::fitVolumePacking.Order.Toys      
+          }
+        let newPacking =
+          {       
+            SetOfExtremePoints = newExtremePoints
+            Order = newOrder
+          }
+        let (indexValue, _, _) = index
+        let newMaxIndexSoFar = (indexValue, newExtremePoints.[0], newConvexHull)
+        packOrderInBoxWuDerivedRecursive (box, tail, newPacking, convexHull, newMaxIndexSoFar, discardZ)
+    else
+        let newExtremePoints = (Set filteredExtremePoints) |> Set.toList
+        let setNewPackedToyOutsideOfBox = 
+          {
+              Details = newPackedToy.Details                
+              Dimensions = newPackedToy.Dimensions
+              Weight = newPackedToy.Weight
+              Origin =             
+              { 
+                  X = 0M<centimeters> - box.Dimensions.Length - 2M<centimeters>
+                  Y = box.Dimensions.Width + 1M<centimeters>
+                  Z = discardZ
+              }
+          } 
+        let newOrder =
+          {
+            Details = fitVolumePacking.Order.Details
+            OrderId = fitVolumePacking.Order.OrderId
+            Toys = setNewPackedToyOutsideOfBox::fitVolumePacking.Order.Toys      
+          }
+        let newPacking =
+          {       
+            SetOfExtremePoints = newExtremePoints
+            Order = newOrder
+          }
+        let newDiscardZ = discardZ + newPackedToy.Dimensions.Height
+        packOrderInBoxWuDerivedRecursive (box, tail, newPacking, convexHull, maxIndexSoFar, newDiscardZ)
+    | [] -> packing
+
+let packOrderInBoxWuMuted (box:Box, toys:Toy list, packing:Packing) =
   let initialConvexHull =
     {
         Dimensions = 
@@ -757,20 +913,42 @@ let packOrderInBox (box:Box, toys:Toy list, packing:Packing) =
       Y = 0M<centimeters>
       Z = 0M<centimeters>
    }
-  let maxIndexSoFar = (0M<centimeters^2>, initialPoint, initialConvexHull)  
-  let newPacking = packOrderInBoxRecursive(box, toys, packing, initialConvexHull, maxIndexSoFar)
+  let maxIndexSoFar = (0M<centimeters>, initialPoint, initialConvexHull)
+  let discardZ = 0M<centimeters>
+  let newPacking = packOrderInBoxWuMutedRecursive(box, toys, packing, initialConvexHull, maxIndexSoFar, discardZ)
   newPacking
 
-let rec algorithmEvaluation (boxes:Box list, toys:Toy list, packing:Packing, convexHull:ConvexHull, maxIndexSoFar) =
+let packOrderInBoxWuDerived (box:Box, toys:Toy list, packing:Packing) =
+  let initialConvexHull =
+    {
+        Dimensions = 
+          {
+            Length = 0M<centimeters>
+            Width = 0M<centimeters>
+            Height = 0M<centimeters>
+          }
+    }
+  let initialPoint = 
+   {
+      X = 0M<centimeters>
+      Y = 0M<centimeters>
+      Z = 0M<centimeters>
+   }
+  let maxIndexSoFar = (0M<centimeters^2>, initialPoint, initialConvexHull)
+  let discardZ = 0M<centimeters>
+  let newPacking = packOrderInBoxWuDerivedRecursive(box, toys, packing, initialConvexHull, maxIndexSoFar, discardZ)
+  newPacking
+
+let rec algorithmEvaluation (boxes:Box list, toys:Toy list, packing:Packing, convexHull:ConvexHull, maxIndexSoFar, algorithm:System.Func<Box * Toy list * Packing, Packing>) =
   let accumulator = 0M<centimeters^3>
   match boxes with
   | head :: tail ->
       let currentBoxVolume = volume head.Dimensions.Length head.Dimensions.Width head.Dimensions.Height
       let currentOrderVolume = getToysVolume(toys, accumulator)
       if (currentBoxVolume >= currentOrderVolume) then
-        packOrderInBox(head, toys, packing)
+        algorithm.Invoke(head, toys, packing)
       else
-        algorithmEvaluation(tail, toys, packing, convexHull, maxIndexSoFar)
+        algorithmEvaluation(tail, toys, packing, convexHull, maxIndexSoFar, algorithm)
   | [] -> packing
 
 let sortMethodForBoxes (box1:Box) (box2:Box) =
@@ -874,7 +1052,7 @@ let executeFitnessEvaluation world =
   fitnessEvaluation(world.Order.Toys, box, packing, initialConvexHull, maxIndexSoFar)
 
 
-let executeAlgorithmEvaluation world =
+let executeAlgorithmEvaluationWuDerived world =
   let packing =
     {       
       SetOfExtremePoints = initialSetOfExtremePoints
@@ -898,7 +1076,33 @@ let executeAlgorithmEvaluation world =
    }
   let maxIndexSoFar = (-1000M<centimeters>, initialPoint, initialConvexHull)
   let boxes = getBoxZ2 world
-  algorithmEvaluation(boxes, world.Order.Toys, packing, initialConvexHull, maxIndexSoFar)
+  algorithmEvaluation(boxes, world.Order.Toys, packing, initialConvexHull, maxIndexSoFar, System.Func<Box * Toy list * Packing, Packing> packOrderInBoxWuDerived)
+
+let executeAlgorithmEvaluationWu world =
+  let packing =
+    {       
+      SetOfExtremePoints = initialSetOfExtremePoints
+      Order = blankOrder
+    }
+  let box = getBox2 world
+  let initialConvexHull =
+    {
+        Dimensions =
+          {
+            Length = 0M<centimeters>
+            Width = 0M<centimeters>
+            Height = 0M<centimeters>
+          }
+    }
+  let initialPoint = 
+   {
+      X = 0M<centimeters>
+      Y = 0M<centimeters>
+      Z = 0M<centimeters>
+   }
+  let maxIndexSoFar = (-1000M<centimeters>, initialPoint, initialConvexHull)
+  let boxes = getBoxZ2 world
+  algorithmEvaluation(boxes, world.Order.Toys, packing, initialConvexHull, maxIndexSoFar, System.Func<Box * Toy list * Packing, Packing> packOrderInBoxWuMuted)
 
 let getToy world =
   match Some(world.Order.Toys |> Seq.head) with 
@@ -906,7 +1110,7 @@ let getToy world =
   |  None -> Failure "Toy does not exist"
 
 let describeDetails details =
-  printfn "\n\n%s\n\n%s\n\n" details.Name details.Description
+  printf "\n\n%s\n\n%s\n\n" details.Name details.Description
   sprintf "\n\n%s\n\n%s\n\n" details.Name details.Description
 
 let extractDetailsFromToy (toy : Toy) =
@@ -921,7 +1125,7 @@ let describeCurrentToy world =
 
 let describeCurrentBox world =
   getBox world
-  |> (bind (switch extractDetailsFromBox) >> bind (switch describeDetails))  
+  |> (bind (switch extractDetailsFromBox) >> bind (switch describeDetails))
 
 let customerOrder_WuExample2 =
   {
@@ -946,7 +1150,7 @@ let customerOrder_WuExample2 =
             {
               Length = 5M<centimeters>
               Width = 6M<centimeters>
-              Height = 7M<centimeters>
+              Height = 4M<centimeters>
             }
           Weight = 1M<kilograms>
           Origin =             
@@ -985,7 +1189,7 @@ let customerOrder_WuExample2 =
           Dimensions = 
             {
               Length = 4M<centimeters>
-              Width = 3M<centimeters>
+              Width = 4M<centimeters>
               Height = 5M<centimeters>
             }
           Weight = 2M<kilograms>
@@ -1004,8 +1208,8 @@ let customerOrder_WuExample2 =
             };                 
           Dimensions = 
             {
-              Length = 1M<centimeters>
-              Width = 3M<centimeters>
+              Length = 5M<centimeters>
+              Width = 7M<centimeters>
               Height = 2M<centimeters>
             }
           Weight = 2M<kilograms>
@@ -1015,7 +1219,27 @@ let customerOrder_WuExample2 =
               Y = 0M<centimeters>
               Z = 0M<centimeters>
             }
-        }                
+        }
+        {
+          Details = 
+            {
+              Name = "Toy#5Name";
+              Description = "Toy#5Description"
+            };                 
+          Dimensions = 
+            {
+              Length = 5M<centimeters>
+              Width = 7M<centimeters>
+              Height = 2M<centimeters>
+            }
+          Weight = 2M<kilograms>
+          Origin =             
+            { 
+              X = 0M<centimeters>
+              Y = 0M<centimeters>
+              Z = 0M<centimeters>
+            }
+        }        
       ]
     }            
 
@@ -1065,112 +1289,9 @@ let worldHalfDepth = worldDepth / 2
 
 let clock = Three.Clock()
 
-// We can also use `System.Random`, but the native JS `Math.random`
-// will be a bit more performant here.
-let inline rand() = JS.Math.random()
-
-(**
-Using the perlin library (ImprovedNoise script) define the peaks
-of the mountains in our random terrain.
-*)
-
-let generateHeight width height =
-    let size = width * height
-    let data:float[] = Array.zeroCreate size
-    let perlin = ImprovedNoise()
-    let mutable quality = 1.0
-    let z = rand() * 100.0
-
-    for j in 0..3 do
-        for i in 0..(size-1) do
-            let x = i % width
-            let y = i / width
-            let noise =
-                perlin.noise(float x / quality, float y / quality, z)
-                    * quality * 1.75
-            data.[i] <- data.[i] + (JS.Math.abs ( noise ))
-        quality <- quality * 5.0
-    data
-
-(**
-To generate the textures for the terrain, we'll be using a canvas element
-to draw the image and later pass it directly to THREE.Texture class.
-*)
-
-let generateTexture (data:float[]) (width:int) (height:int) =
-    let vector3 = Three.Vector3(0.0, 0.0, 0.0)
-    let sun = (Three.Vector3(1.0, 1.0, 1.0) :> Three.Vector).normalize()
-
-    let canvas = Browser.document.createElement_canvas()
-    canvas.width <- float width
-    canvas.height <- float height
-
-    let context = canvas.getContext_2d()
-    context.fillStyle <- U3.Case1 "#000"
-    context.fillRect(0.0, 0.0, float width, float height)
-
-    let image = context.getImageData(
-                    0.0, 0.0, canvas.width, canvas.height)
-    let imageData = image.data
-
-    let mutable i = 0
-    let mutable j = 0
-    let mutable l = int imageData.length
-
-    while i < l do
-        // Note: data elements -2 and -1 are accessed here at the start
-        // of the loop. It's a bug in the original (producing NaN after
-        // normalize()), but JS just keeps on truckin'. There is a similar
-        // issue with z.  The result is that imageData is set to zero (black)
-        // in these cases
-        vector3.x <- data.[ j - 2 ] - data.[ j + 2 ]
-        vector3.y <- 2.0
-        vector3.z <- data.[ j - width * 2 ] - data.[ j + width * 2 ]
-        (vector3 :> Three.Vector).normalize() |> ignore
-
-        let shade = vector3.dot(sun :?> Three.Vector3)
-
-        imageData.[ i ] <-
-            (96.0 + shade * 128.0) * (0.5 + data.[ j ] * 0.007)
-        imageData.[ i + 1 ] <-
-            (32.0 + shade * 96.0) * (0.5 + data.[ j ] * 0.007)
-        imageData.[ i + 2 ] <-
-            (shade * 96.0) * (0.5 + data.[ j ] * 0.007)
-
-        i <- i + 4
-        j <- j + 1
-
-    context.putImageData( image, 0.0, 0.0 );
-
-    let canvasScaled = Browser.document.createElement_canvas()
-    canvasScaled.width <- float(width * 4)
-    canvasScaled.height <- float(height * 4)
-
-    let context = canvasScaled.getContext_2d()
-    context.scale(4.0,4.0)
-    context.drawImage(U3.Case2 canvas, 0.0, 0.0)
-
-    let image = context.getImageData(
-                    0.0, 0.0, canvasScaled.width, canvasScaled.height)
-    let imageData = image.data
-
-    let mutable i = 0
-    let mutable l = int imageData.length
-    while i < l do
-        // I presume double-not is used here for this reason:
-        // http://james.padolsey.com/javascript/double-bitwise-not/
-        let v = ~~~ (~~~ (rand() * 5.0 |> int)) |> float
-        imageData.[ i ] <- imageData.[ i ] + v
-        imageData.[ i + 1 ] <- imageData.[ i + 1 ] + v
-        imageData.[ i + 2 ] <- imageData.[ i + 2 ] + v
-        i <- i + 4
-
-    context.putImageData(image, 0.0, 0.0)
-    canvasScaled
-
 let scale = 2.0
 
-let convertBoxesToWebGL(box:Box, scene:Three.Scene) = 
+let convertBoxesToWebGL(box:Box, scene:Three.Scene, offset: decimal<centimeters>) = 
   let color = new Three.Color(255.0, 0.0, 0.0)  // Red
   let meshMaterial = new Three.MeshBasicMaterial()
   meshMaterial.color <- color
@@ -1185,49 +1306,35 @@ let convertBoxesToWebGL(box:Box, scene:Three.Scene) =
   let convert = bufferGeometry.fromGeometry(boxGeometry);
   let box = new Three.Mesh(convert, meshMaterial)
   box.scale.set(scale, scale, scale) |> ignore
-  //box.position.x <- 0.0
-  //box.position.y <- 0.0
-  //box.position.z <- 0.0 
+  box.position.x <- 0.0 + (scale * float (offset/1M<centimeters>))
   scene.add(box)
 
-let calculateWebGLPositionFromWuCoordinates (description:string, boxDimension:decimal<centimeters>, toyPosition:decimal<centimeters>, toyDimension:decimal<centimeters>, scale: decimal) =
+let calculateWebGLPositionFromWuCoordinates (boxDimension:decimal<centimeters>, toyPosition:decimal<centimeters>, toyDimension:decimal<centimeters>, scale: decimal) =
   let graphicCenter = 0.0M<centimeters>
   let halfTheBox = 0.5M * boxDimension * scale
   let halfTheToy = 0.5M * toyDimension * scale
   let graphicPosition = graphicCenter - halfTheBox + (toyPosition  * scale) + halfTheToy
-  printfn "%O- boxDim %O .5boxDim %O toyPos %O / halfToy %O graphPos %O" 
-    description boxDimension halfTheBox toyPosition halfTheToy graphicPosition
   Math.Round(graphicPosition/1M<centimeters>, 3)
 
-let printColor description color =
-  //let color = Three.Color(10.0, 245.0, 250.0) // Green
-  printfn "toy: %O" description
-  printfn "Color: %O" color
-
-let rec convertToysToWebGL(toys:Toy list, scene:Three.Scene, random:Random, box:Box, meshList:Three.Mesh list) = 
+let rec convertToysToWebGL(toys:Toy list, scene:Three.Scene, random:Random, box:Box, meshList:Three.Mesh list, offset: decimal<centimeters>) = 
   match toys with
   | head :: tail ->
-      if head.Details.Description.Contains("#") then
-        //let red, green, blue = random.Next(256), random.Next(256), random.Next(256)
-        //let color = new Three.Color((float red), (float green), (float blue))  // Random color
-        //let color = new Three.Color((float red), (float green), 0.0)  // Red
-        let mutable color = new Three.Color(255.0, 255.0, 255.0)
-        if head.Details.Description.Contains("#1") then
-          printColor head.Details.Description "Red"
-          color <- new Three.Color(255.0, 0.0, 0.0) // Red
-        else if head.Details.Description.Contains("#2") then
-          printColor head.Details.Description "Green"
-          color <- new Three.Color(0.0, 255.0, 0.0) // Green
-        else if head.Details.Description.Contains("#3") then
-          printColor head.Details.Description "Blue"
-          color <- new Three.Color(0.0, 0.0, 255.0) // Blue
-        else
-          printColor head.Details.Description "White"
-  
-         // Red
-        //printfn "%s" "red: " + red
-        //console.log()
-  
+      if head.Details.Description.Trim().Length > 0 then
+
+        let mutable color = new Three.Color(255.0, 255.0, 255.0)  // White
+        if tail.Length % 7 = 0 then
+          color <- new Three.Color(255.0, 0.0, 0.0)               // Red
+        else if tail.Length % 7 = 1 then       
+          color <- new Three.Color(0.0, 255.0, 0.0)               // Green
+        else if tail.Length % 7 = 2 then       
+          color <- new Three.Color(0.0, 0.0, 255.0)               // Blue
+        else if tail.Length % 7 = 3 then       
+          color <- new Three.Color(255.0, 255.0, 0.0)             // Yellow
+        else if tail.Length % 7 = 4 then       
+          color <- new Three.Color(0.0, 255.0, 255.0)             // Light Blue
+        else if tail.Length % 7 = 5 then       
+          color <- new Three.Color(255.0, 0.0, 255.0)             // Purple
+
         let meshMaterial = new Three.MeshBasicMaterial()
         meshMaterial.color <- color
         meshMaterial.transparent <- true
@@ -1239,37 +1346,34 @@ let rec convertToysToWebGL(toys:Toy list, scene:Three.Scene, random:Random, box:
         let bufferGeometry = new Three.BufferGeometry()
         let convert = bufferGeometry.fromGeometry(boxGeometry);
         let toy = new Three.Mesh(convert, meshMaterial)
-        printfn "ox %O oy %O oz %O" head.Origin.X head.Origin.Y head.Origin.Z
-        printfn "dx %O dy %O dz %O" head.Dimensions.Width head.Dimensions.Height head.Dimensions.Length 
+
         toy.scale.set(scale, scale, scale) |> ignore
-        toy.position.x <- float(calculateWebGLPositionFromWuCoordinates("x/width", box.Dimensions.Width, head.Origin.Y, head.Dimensions.Width, (decimal)scale))
-        toy.position.y <- float(calculateWebGLPositionFromWuCoordinates("y/height", box.Dimensions.Height, head.Origin.Z, head.Dimensions.Height, (decimal)scale))
-        toy.position.z <- float(calculateWebGLPositionFromWuCoordinates("z/length", box.Dimensions.Length, head.Origin.X, head.Dimensions.Length, (decimal)scale))
-        printfn "x %O y %O z %O" toy.position.x toy.position.y toy.position.z
+        toy.position.x <- float(calculateWebGLPositionFromWuCoordinates(box.Dimensions.Width, head.Origin.Y, head.Dimensions.Width, (decimal)scale))
+                          + (scale * float (offset/1M<centimeters>))
+        toy.position.y <- float(calculateWebGLPositionFromWuCoordinates(box.Dimensions.Height, head.Origin.Z, head.Dimensions.Height, (decimal)scale))
+        toy.position.z <- float(calculateWebGLPositionFromWuCoordinates(box.Dimensions.Length, head.Origin.X, head.Dimensions.Length, (decimal)scale))
   
         scene.add(toy)
 
-        convertToysToWebGL(tail, scene, random, box, toy::meshList)
+        convertToysToWebGL(tail, scene, random, box, toy::meshList, offset)
       else
-        convertToysToWebGL(tail, scene, random, box, meshList)
+        convertToysToWebGL(tail, scene, random, box, meshList, offset)
   | [] -> meshList
 
-let convertAlgorithmToWebGl(algorithm:World, scene:Three.Scene) =
+let convertAlgorithmToWebGl(algorithm:World, scene:Three.Scene, offset: decimal<centimeters>) =
   let boxes = getBoxZ2 algorithm
   let oneBox = (boxes |> Seq.head)
-  convertBoxesToWebGL(oneBox, scene)
+  convertBoxesToWebGL(oneBox, scene, offset)
   let random = new Random()
   //let toy = (algorithm.Order.Toys |> Seq.head)
   //let toys = [algorithm.Order.Toys.[2]]
   let helper = new Three.AxisHelper(30.0)
   scene.add(helper)
   let meshList = []
-  let meshListReturn = convertToysToWebGL(algorithm.Order.Toys, scene, random, oneBox, meshList)
+  let meshListReturn = convertToysToWebGL(algorithm.Order.Toys, scene, random, oneBox, meshList, offset)
   let mutable count = 1
   for mesh in meshListReturn do
-    //printfn "add a mesh %O" count
     count <- count + 1
-    //scene.add(mesh)
   let myColor = U2.Case2 "#3C3C3C"
   let ambientLight = new Three.AmbientLight(myColor, 2.0)
   scene.add(ambientLight)
@@ -1309,59 +1413,35 @@ let init() =
     container.appendChild(domElement) |> ignore
 
     let controls = OrbitControls.Create(camera :> Three.Camera, domElement :> Browser.HTMLElement)
-    //controls.movementSpeed <- 1000.0
-    //controls.lookSpeed <- 0.1
-
-    let data = generateHeight worldWidth worldDepth
-
     camera.position.y <- 50.
 
-    let geometry = Three.PlaneBufferGeometry(
-                        7500.0, 7500.0,
-                        float (worldWidth - 1), float (worldDepth - 1))
-    geometry.applyMatrix(Three.Matrix4()
-            .makeRotationX(-JS.Math.PI / 2.0))
-            |> ignore
-
-    let vertices = geometry.getAttribute("position")
-                    |> unbox<Three.BufferAttribute>
-    let vertices = vertices.array
-    let l = int vertices.length
-    let mutable i = 0
-    let mutable j = 0
-    while i < l do
-        vertices.[j + 1] <- data.[i] * 10.0
-        i <- i + 1
-        j <- j + 3
-
-    let texCanvas = generateTexture data worldWidth worldDepth
-    let texture = Three.Texture(
-                    U3.Case2 texCanvas, Three.UVMapping,
-                    Three.ClampToEdgeWrapping,
-                    Three.ClampToEdgeWrapping)
-    texture.needsUpdate <- true
-
-    // We use createEmpty here to create an empty object used to set
-    // configuration parameters. The type qualifier indicates what fields
-    // we will be able to set on the resulting object. For those fields that
-    // are enum types, the possible values are usually found in three globals.
-    let matProps = createEmpty<Three.MeshBasicMaterialParameters>
-    matProps.map <- Some texture
-
-    let mesh = Three.Mesh(geometry, Three.MeshBasicMaterial(matProps))
-    //scene.add mesh
-
-    let packing = executeAlgorithmEvaluation algorithmWorld
-    let algorithmWorldPacked =
+    let packingWuDerived = executeAlgorithmEvaluationWuDerived algorithmWorld
+    let algorithmWorldPackedWuDerived =
       {
         AvailableBoxes =
           allBoxes_WuExample3
           |> Seq.map (fun box -> (box.Id, box))
           |> Map.ofSeq
         Customer = customer
-        Order = packing.Order       
+        Order = packingWuDerived.Order       
       }
-    convertAlgorithmToWebGl(algorithmWorldPacked, scene) |> ignore
+    let boxes = getBoxZ2 algorithmWorldPackedWuDerived
+    let oneBox = (boxes |> Seq.head)
+    let offset1 = (oneBox.Dimensions.Length + 2M<centimeters>)
+    convertAlgorithmToWebGl(algorithmWorldPackedWuDerived, scene, offset1) |> ignore
+
+    let packingWu = executeAlgorithmEvaluationWu algorithmWorld
+    let algorithmWorldPackedWu =
+      {
+        AvailableBoxes =
+          allBoxes_WuExample3
+          |> Seq.map (fun box -> (box.Id, box))
+          |> Map.ofSeq
+        Customer = customer
+        Order = packingWu.Order       
+      }
+    let offset2 = 0M<centimeters> - (oneBox.Dimensions.Length + 2M<centimeters>)
+    convertAlgorithmToWebGl(algorithmWorldPackedWu, scene, offset2) |> ignore    
 
     let onWindowResize(e:Browser.UIEvent):obj =
         camera.aspect <- getWidth() / getHeight()
@@ -1369,8 +1449,6 @@ let init() =
         (renderer :> Three.Renderer).setSize(getWidth(), getHeight())
         controls.handleResize()
         null
-
-    printfn "here baby"
 
     Browser.window.addEventListener_resize(
         Func<_,_> onWindowResize, false)
