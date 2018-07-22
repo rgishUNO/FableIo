@@ -68,6 +68,12 @@
       "desc": "This demo is a Fable port of the [WebGL Geometry Terrain](http://threejs.org/examples/#webgl_geometry_terrain) three.js demo. It uses the three.js library to randomly generate a 3D terrain which can be navigated in a first-person view. The code was originally written by [John Quigley](https://github.com/jmquigs) for FunScript.",
       "img": "webGLTerrain.png"
     },
+    "webgl-box": {
+      "entry": "WebGL.Box.fsproj",
+      "title": "WebGL Bin Packing",
+      "desc": " This demo uses the three.js library to compare bin packing algorithms which can be navigated in a first-person orbiting view.",
+      "img": "webGLTerrain.png"
+    },    
     "mandelbrot": {
       "entry": "Mandelbrot.fsproj",
       "title": "Mandelbrot Fractal",
